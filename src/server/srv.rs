@@ -27,6 +27,11 @@ use openssl::pkcs12::ParsedPkcs12;
 #[cfg(feature="alpn")]
 use tokio_openssl::SslStream;
 
+#[cfg(feature="rust-tls")]
+use rustls::ServerConfig as RustlsServerConfig;
+#[cfg(feature="rust-tls")]
+use tokio_rustls::ServerConfigExt as RustlsServerConfigExt;
+
 use helpers;
 use super::{HttpHandler, IntoHttpHandler, IoStream};
 use super::{PauseServer, ResumeServer, StopServer};
