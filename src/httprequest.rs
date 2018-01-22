@@ -156,16 +156,15 @@ impl<S> HttpRequest<S> {
 
     // get mutable reference for inner message
     // mutable reference should not be returned as result for request's method
-    #[inline(always)]
-    #[cfg_attr(feature = "cargo-clippy", allow(mut_from_ref, inline_always))]
+    #[inline]
+    #[cfg_attr(feature = "cargo-clippy", allow(mut_from_ref))]
     pub(crate) fn as_mut(&self) -> &mut HttpMessage {
-        self.0.get_mut()
+        unsafe { &mut *(self as *const _ as *mut HttpRequest<S>) }.0.as_mut()
     }
 
-    #[inline(always)]
-    #[cfg_attr(feature = "cargo-clippy", allow(mut_from_ref, inline_always))]
+    #[inline]
     fn as_ref(&self) -> &HttpMessage {
-        self.0.get_ref()
+        self.0.as_ref()
     }
 
     #[inline]

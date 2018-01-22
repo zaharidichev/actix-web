@@ -458,7 +458,7 @@ impl Reader {
     fn parse_message<H>(buf: &mut BytesMut, settings: &WorkerSettings<H>)
                         -> Poll<(HttpRequest, Option<PayloadInfo>), ParseError> {
         // Parse http message
-        let msg = {
+        let mut msg = {
             let bytes_ptr = buf.as_ref().as_ptr() as usize;
             let mut headers: [httparse::Header; MAX_HEADERS] =
                 unsafe{std::mem::uninitialized()};
@@ -489,14 +489,14 @@ impl Reader {
             let slice = buf.split_to(len).freeze();
 
             // convert headers
-            let msg = settings.get_http_message();
+            let mut msg = settings.get_http_message();
             for header in headers[..headers_len].iter() {
                 if let Ok(name) = HeaderName::try_from(header.name) {
                     let v_start = header.value.as_ptr() as usize - bytes_ptr;
                     let v_end = v_start + header.value.len();
                     let value = unsafe {
                         HeaderValue::from_shared_unchecked(slice.slice(v_start, v_end)) };
-                    msg.get_mut().headers.append(name, value);
+                    msg.as_mut().headers.append(name, value);
                 } else {
                     return Err(ParseError::Header)
                 }
@@ -505,13 +505,15 @@ impl Reader {
             let path = slice.slice(path.0, path.1);
             let uri = Uri::from_shared(path).map_err(ParseError::Uri)?;
 
-            msg.get_mut().uri = uri;
-            msg.get_mut().method = method;
-            msg.get_mut().version = version;
+            msg.as_mut().uri = uri;
+            msg.as_mut().method = method;
+            msg.as_mut().version = version;
             msg
         };
 
-        let decoder = if let Some(len) = msg.get_ref().headers.get(header::CONTENT_LENGTH) {
+        let decoder = {
+            let m = msg.as_mut();
+            if let Some(len) = m.headers.get(header::CONTENT_LENGTH) {
             // Content-Length
             if let Ok(s) = len.to_str() {
                 if let Ok(len) = s.parse::<u64>() {
@@ -524,24 +526,25 @@ impl Reader {
                 debug!("illegal Content-Length: {:?}", len);
                 return Err(ParseError::Header)
             }
-        } else if chunked(&msg.get_mut().headers)? {
-            // Chunked encoding
-            Some(Decoder::chunked())
-        } else if msg.get_ref().headers.contains_key(header::UPGRADE) ||
-            msg.get_ref().method == Method::CONNECT
-        {
-            Some(Decoder::eof())
-        } else {
-            None
+            } else if chunked(&m.headers)? {
+                // Chunked encoding
+                Some(Decoder::chunked())
+            } else if m.headers.contains_key(header::UPGRADE) ||
+                m.method == Method::CONNECT
+            {
+                Some(Decoder::eof())
+            } else {
+                None
+            }
         };
 
         if let Some(decoder) = decoder {
             let (psender, payload) = Payload::new(false);
             let info = PayloadInfo {
-                tx: PayloadType::new(&msg.get_mut().headers, psender),
+                tx: PayloadType::new(&msg.as_mut().headers, psender),
                 decoder: decoder,
             };
-            msg.get_mut().payload = Some(payload);
+            msg.as_mut().payload = Some(payload);
             Ok(Async::Ready((HttpRequest::from_message(msg), Some(info))))
         } else {
             Ok(Async::Ready((HttpRequest::from_message(msg), None)))

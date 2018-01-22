@@ -849,11 +849,11 @@ mod tests {
 
     #[test]
     fn test_chunked_te() {
-        let bytes = SharedBytes::default();
+        let mut bytes = SharedBytes::default();
         let mut enc = TransferEncoding::chunked(bytes.clone());
         assert!(!enc.encode(Binary::from(b"test".as_ref())).ok().unwrap());
         assert!(enc.encode(Binary::from(b"".as_ref())).ok().unwrap());
-        assert_eq!(bytes.get_mut().take().freeze(),
+        assert_eq!(bytes.as_mut().take().freeze(),
                    Bytes::from_static(b"4\r\ntest\r\n0\r\n\r\n"));
     }
 }

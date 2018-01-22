@@ -1,5 +1,4 @@
 use std::io;
-use bytes::BufMut;
 use futures::{Async, Poll};
 use tokio_io::AsyncWrite;
 use http::{Method, Version};
@@ -119,49 +118,48 @@ impl<T: AsyncWrite> Writer for H1Writer<T> {
 
         // render message
         {
-            let mut buffer = self.buffer.get_mut();
             if let Body::Binary(ref bytes) = body {
-                buffer.reserve(256 + msg.headers().len() * AVERAGE_HEADER_SIZE + bytes.len());
+                self.buffer.reserve(256 + msg.headers().len() * AVERAGE_HEADER_SIZE + bytes.len());
             } else {
-                buffer.reserve(256 + msg.headers().len() * AVERAGE_HEADER_SIZE);
+                self.buffer.reserve(256 + msg.headers().len() * AVERAGE_HEADER_SIZE);
             }
 
             // status line
-            helpers::write_status_line(version, msg.status().as_u16(), &mut buffer);
-            buffer.extend_from_slice(msg.reason().as_bytes());
+            helpers::write_status_line(version, msg.status().as_u16(), self.buffer.as_mut());
+            self.buffer.put_slice(msg.reason().as_bytes());
 
             match body {
                 Body::Empty =>
                     if req.method != Method::HEAD {
-                        buffer.extend_from_slice(b"\r\ncontent-length: 0\r\n");
+                        self.buffer.put_slice(b"\r\ncontent-length: 0\r\n");
                     } else {
-                        buffer.extend_from_slice(b"\r\n");
+                        self.buffer.put_slice(b"\r\n");
                     },
                 Body::Binary(ref bytes) =>
-                    helpers::write_content_length(bytes.len(), &mut buffer),
+                    helpers::write_content_length(bytes.len(), self.buffer.as_mut()),
                 _ =>
-                    buffer.extend_from_slice(b"\r\n"),
+                    self.buffer.put_slice(b"\r\n"),
             }
 
             // write headers
             for (key, value) in msg.headers() {
                 let v = value.as_ref();
                 let k = key.as_str().as_bytes();
-                buffer.reserve(k.len() + v.len() + 4);
-                buffer.put_slice(k);
-                buffer.put_slice(b": ");
-                buffer.put_slice(v);
-                buffer.put_slice(b"\r\n");
+                self.buffer.reserve(k.len() + v.len() + 4);
+                self.buffer.put_slice(k);
+                self.buffer.put_slice(b": ");
+                self.buffer.put_slice(v);
+                self.buffer.put_slice(b"\r\n");
             }
 
             // using helpers::date is quite a lot faster
             if !msg.headers().contains_key(DATE) {
-                helpers::date(&mut buffer);
+                helpers::date(self.buffer.as_mut());
             } else {
                 // msg eof
-                buffer.extend_from_slice(b"\r\n");
+                self.buffer.extend_from_slice(b"\r\n");
             }
-            self.headers_size = buffer.len() as u32;
+            self.headers_size = self.buffer.len() as u32;
         }
 
         if let Body::Binary(bytes) = body {

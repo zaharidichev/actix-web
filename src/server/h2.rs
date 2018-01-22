@@ -259,13 +259,16 @@ impl Entry {
         // Payload and Content-Encoding
         let (psender, payload) = Payload::new(false);
 
-        let msg = settings.get_http_message();
-        msg.get_mut().uri = parts.uri;
-        msg.get_mut().method = parts.method;
-        msg.get_mut().version = parts.version;
-        msg.get_mut().headers = parts.headers;
-        msg.get_mut().payload = Some(payload);
-        msg.get_mut().addr = addr;
+        let mut msg = settings.get_http_message();
+        {
+            let m = msg.as_mut();
+            m.uri = parts.uri;
+            m.method = parts.method;
+            m.version = parts.version;
+            m.headers = parts.headers;
+            m.payload = Some(payload);
+            m.addr = addr;
+        }
 
         let mut req = HttpRequest::from_message(msg);
 

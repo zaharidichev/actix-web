@@ -1,5 +1,5 @@
 use std::{str, mem, ptr, slice};
-use std::cell::RefCell;
+use std::cell::{RefCell, UnsafeCell};
 use std::fmt::{self, Write};
 use std::rc::Rc;
 use std::ops::{Deref, DerefMut};
@@ -67,32 +67,35 @@ impl fmt::Write for CachedDate {
 }
 
 /// Internal use only! unsafe
-pub(crate) struct SharedMessagePool(RefCell<VecDeque<Rc<HttpMessage>>>);
+pub(crate) struct SharedMessagePool(RefCell<VecDeque<Rc<UnsafeCell<HttpMessage>>>>);
 
 impl SharedMessagePool {
     pub fn new() -> SharedMessagePool {
         SharedMessagePool(RefCell::new(VecDeque::with_capacity(128)))
     }
 
-    pub fn get(&self) -> Rc<HttpMessage> {
+    pub fn get(&self) -> Rc<UnsafeCell<HttpMessage>> {
         if let Some(msg) = self.0.borrow_mut().pop_front() {
             msg
         } else {
-            Rc::new(HttpMessage::default())
+            Rc::new(UnsafeCell::new(HttpMessage::default()))
         }
     }
 
-    pub fn release(&self, mut msg: Rc<HttpMessage>) {
+    pub fn release(&self, msg: Rc<UnsafeCell<HttpMessage>>) {
         let v = &mut self.0.borrow_mut();
         if v.len() < 128 {
-            Rc::get_mut(&mut msg).unwrap().reset();
+            {
+                let m = unsafe{ &mut *msg.get() };
+                m.reset();
+            }
             v.push_front(msg);
         }
     }
 }
 
 pub(crate) struct SharedHttpMessage(
-    Option<Rc<HttpMessage>>, Option<Rc<SharedMessagePool>>);
+    Option<Rc<UnsafeCell<HttpMessage>>>, Option<Rc<SharedMessagePool>>);
 
 impl Drop for SharedHttpMessage {
     fn drop(&mut self) {
@@ -110,14 +113,14 @@ impl Deref for SharedHttpMessage {
     type Target = HttpMessage;
 
     fn deref(&self) -> &HttpMessage {
-        self.get_ref()
+        self.as_ref()
     }
 }
 
 impl DerefMut for SharedHttpMessage {
 
     fn deref_mut(&mut self) -> &mut HttpMessage {
-        self.get_mut()
+        self.as_mut()
     }
 }
 
@@ -131,32 +134,28 @@ impl Clone for SharedHttpMessage {
 impl Default for SharedHttpMessage {
 
     fn default() -> SharedHttpMessage {
-        SharedHttpMessage(Some(Rc::new(HttpMessage::default())), None)
+        SharedHttpMessage(Some(Rc::new(UnsafeCell::new(HttpMessage::default()))), None)
     }
 }
 
 impl SharedHttpMessage {
 
     pub fn from_message(msg: HttpMessage) -> SharedHttpMessage {
-        SharedHttpMessage(Some(Rc::new(msg)), None)
+        SharedHttpMessage(Some(Rc::new(UnsafeCell::new(msg))), None)
     }
 
-    pub fn new(msg: Rc<HttpMessage>, pool: Rc<SharedMessagePool>) -> SharedHttpMessage {
+    pub fn new(msg: Rc<UnsafeCell<HttpMessage>>, pool: Rc<SharedMessagePool>) -> SharedHttpMessage {
         SharedHttpMessage(Some(msg), Some(pool))
     }
 
-    #[inline(always)]
-    #[allow(mutable_transmutes)]
-    #[cfg_attr(feature = "cargo-clippy", allow(mut_from_ref, inline_always))]
-    pub fn get_mut(&self) -> &mut HttpMessage {
-        let r: &HttpMessage = self.0.as_ref().unwrap().as_ref();
-        unsafe{mem::transmute(r)}
+    #[inline]
+    pub fn as_mut(&mut self) -> &mut HttpMessage {
+        unsafe{ &mut *self.0.as_ref().unwrap().as_ref().get() }
     }
 
-    #[inline(always)]
-    #[cfg_attr(feature = "cargo-clippy", allow(inline_always))]
-    pub fn get_ref(&self) -> &HttpMessage {
-        self.0.as_ref().unwrap()
+    #[inline]
+    pub fn as_ref(&self) -> &HttpMessage {
+        unsafe{ &*self.0.as_ref().unwrap().as_ref().get() }
     }
 }
 
